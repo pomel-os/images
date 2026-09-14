@@ -1,0 +1,29 @@
+[Unit]
+Description=Seed Bazzite's default system flatpaks shortly after boot
+Documentation=https://github.com/ublue-os/bazzite
+
+# Skip arming entirely on an already-seeded machine.
+ConditionPathExists=!/var/lib/flatpak/.pomelos-seeded
+
+[Timer]
+# Fire as early as possible. The point of using a timer at all is not to delay
+# anything -- it is to keep a Type=oneshot unit out of the boot transaction, so
+# a multi-gigabyte download cannot hold up boot. Timer-triggered jobs are queued
+# asynchronously, so OnBootSec=0 is off the critical path just as much as a
+# longer delay would be.
+#
+# When it actually starts is governed by the service's own ordering:
+# After=bazzite-flatpak-manager.service (which configures the flathub remote)
+# and After=network-online.target.
+OnBootSec=0
+AccuracySec=1s
+
+# One attempt per boot, deliberately. A failed run writes no stamp (the service
+# only touches it in ExecStartPost, after a successful ExecStart), so both this
+# timer and the service pass their conditions again on the next boot and it
+# retries then. Type=oneshot units cannot use Restart= anyway -- systemd rejects
+# anything but Restart=no.
+Unit=pomelos-flatpak-seed.service
+
+[Install]
+WantedBy=timers.target

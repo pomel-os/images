@@ -1,0 +1,33 @@
+[Unit]
+Description=Install Bazzite's default system flatpaks
+Documentation=https://github.com/ublue-os/bazzite
+
+# Same idiom as upstream's flatpak-add-fedora-repos.service: a stamp file under
+# /var/lib/flatpak, checked here and written by ExecStartPost below.
+ConditionPathExists=!/var/lib/flatpak/.pomelos-seeded
+
+# bazzite-flatpak-manager is what configures the flathub remote, so there is
+# nothing to install from until it has run.
+After=bazzite-flatpak-manager.service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Upstream's own recipe (80-bazzite.just), whose stated purpose is "Support for
+# Rebasing" -- systems that got Bazzite without the ISO installer, which is
+# exactly what a bootc-image-builder disk is. It picks gnome/kde from
+# /usr/share/ublue-os/image-info.json and fetches the current list itself, so we
+# neither ship nor track a flatpak list.
+ExecStart=/usr/bin/ujust _install-system-flatpaks
+
+# Only reached when ExecStart succeeded, so a failed run leaves the stamp absent
+# and the timer tries again.
+ExecStartPost=/usr/bin/touch /var/lib/flatpak/.pomelos-seeded
+
+# No [Install]: started by pomelos-flatpak-seed.timer, deliberately. Pulling a
+# Type=oneshot unit into multi-user.target would hold the boot -- and therefore
+# SDDM -- until several GiB had downloaded. Upstream can use
+# WantedBy=multi-user.target because their unit only runs `flatpak remote-add`.

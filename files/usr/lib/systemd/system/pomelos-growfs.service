@@ -1,0 +1,10 @@
+[Unit]
+Description=Grow the root partition and btrfs filesystem to fill the disk
+ConditionPathIsMountPoint=/var
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/pomelos-growfs
+
+[Install]
+WantedBy=multi-user.target

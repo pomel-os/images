@@ -1,0 +1,20 @@
+#!/usr/bin/bash
+# Grow the root partition and btrfs filesystem to fill the disk.
+#
+# Does the partition half itself rather than relying on cloud-init's growpart,
+# so the image sizes correctly with no datasource present. cc_resizefs cannot do
+# the filesystem half on bootc at all -- it hardcodes "/", a composefs overlay
+# with no block device behind it.
+#
+# /var, not /sysroot: same btrfs filesystem, but ostree mounts /sysroot ro and
+# `btrfs filesystem resize` needs a writable mount.
+set -euo pipefail
+
+dev="$(findmnt -no SOURCE --nofsroot /var)"   # /dev/vda4
+disk="/dev/$(lsblk -no PKNAME "${dev}")"      # /dev/vda
+part="${dev##*[!0-9]}"                        # 4
+
+# growpart exits non-zero with NOCHANGE when the partition already fills the
+# disk -- the normal case on every boot after the first.
+growpart "${disk}" "${part}" || true
+btrfs filesystem resize max /var

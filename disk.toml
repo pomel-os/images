@@ -1,0 +1,8 @@
+# No partitioning here on purpose: `--rootfs btrfs` on the BIB command line is
+# required (Bazzite declares no default rootfs) and gives compress=zstd:1, which
+# a customizations.disk block silently drops. See README "Partition layout".
+
+[customizations.kernel]
+# bazzite-hardware-setup appends bluetooth.disable_ertm=1 on first boot and then
+# reboots; pre-setting it skips that. BIB already adds console=tty0/ttyS0.
+append = "bluetooth.disable_ertm=1 console=ttyS0,115200n8"
