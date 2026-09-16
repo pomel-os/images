@@ -130,8 +130,11 @@ jobs:
       - name: Login to GHCR
         if: github.event_name != 'pull_request'
         run: |
+          # Both, like upstream: cosign reads docker's config, podman its own.
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Push to GHCR
         id: push
