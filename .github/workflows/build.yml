@@ -142,11 +142,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Push once by version, then copy that digest to the moving tags, so
-          # every tag points at one manifest instead of several identical ones.
-          podman push --digestfile=/tmp/digestfile \
-            "localhost/${{ matrix.image }}:${VERSION}" \
-            "docker://${OUTPUT_IMAGE}:${VERSION}"
+          # Twice, like upstream: the first push's --digestfile can name a
+          # manifest the registry never stored.
+          push_version() {
+            podman push --digestfile=/tmp/digestfile \
+              "localhost/${{ matrix.image }}:${VERSION}" \
+              "docker://${OUTPUT_IMAGE}:${VERSION}"
+          }
+          push_version
+          push_version
 
           digest="$(< /tmp/digestfile)"
           if [[ -z "$digest" ]]; then
