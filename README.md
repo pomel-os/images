@@ -19,6 +19,16 @@ Fedora host with `podman` and `sudo`; `qemu-img`, `virt-install` and
 
 ## 1. Derived image
 
+CI already publishes this on every push to `main` and weekly
+(`.github/workflows/build.yml`), so you can skip straight to step 2 with
+`ghcr.io/pomel-os/pomelos-bazzite-nvidia-open:stable`. It is cosign-signed:
+
+```sh
+cosign verify --key cosign.pub ghcr.io/pomel-os/pomelos-bazzite-nvidia-open:stable
+```
+
+To build it yourself:
+
 ```sh
 sudo podman build \
   --build-arg SOURCE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia-open:stable \

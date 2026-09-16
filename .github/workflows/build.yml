@@ -1,0 +1,208 @@
+name: Build Pomelos Bazzite
+
+# Builds the derived Bazzite image from Containerfile, pushes it to GHCR and
+# signs it with cosign using the key in the SIGNING_SECRET repo secret.
+# The public half lives in cosign.pub — `cosign verify --key cosign.pub <image>`.
+#
+# This builds the *container* image only. The qcow2 is still produced locally
+# with bootc-image-builder; see README.md step 2.
+
+on:
+  schedule:
+    - cron: "40 5 * * 1" # 5:40 UTC monday, after upstream Bazzite's 4:40 build
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "cosign.pub"
+      - "disk.toml"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "cosign.pub"
+      - "disk.toml"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  REPO_OWNER: ${{ github.repository_owner }}
+  CLOUD_USER: pomelos
+
+jobs:
+  build:
+    name: Build ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Add further flavors here (bazzite-nvidia, bazzite) by copying this
+          # block; `image` is the published name, `source` the upstream one.
+          - image: pomelos-bazzite-nvidia-open
+            source: ghcr.io/ublue-os/bazzite-nvidia-open
+            source_tag: stable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # A full Bazzite nvidia image plus the derived layer does not fit in the
+      # ~25 GB a stock runner leaves free.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: true
+          docker-images: true
+          large-packages: true
+          swap-storage: false
+
+      - name: Show disk space
+        run: df -h /
+
+      - name: Resolve image names and tags
+        id: vars
+        run: |
+          set -euo pipefail
+
+          # GHCR namespaces must be lower-case; GitHub owner names need not be.
+          output_image="ghcr.io/${REPO_OWNER,,}/${{ matrix.image }}"
+
+          # Pin the build to the digest the tag resolves to right now, so the
+          # tag we publish and the bits we built can never drift apart.
+          source_ref="${{ matrix.source }}:${{ matrix.source_tag }}"
+          skopeo inspect "docker://${source_ref}" > source.json
+          source_digest="$(jq -r '.Digest' source.json)"
+          upstream_version="$(jq -r '.Labels["org.opencontainers.image.version"] // empty' source.json)"
+
+          if [[ -z "$source_digest" || "$source_digest" == "null" ]]; then
+            echo "could not resolve a digest for ${source_ref}" >&2
+            exit 1
+          fi
+
+          # Upstream's version looks like "44.20260915" — reuse it so a pomelos
+          # tag says which Bazzite it was built from. Fall back to the date.
+          version="${upstream_version:-$(date +%Y%m%d)}"
+
+          {
+            echo "output_image=${output_image}"
+            echo "source_image=${{ matrix.source }}@${source_digest}"
+            echo "source_digest=${source_digest}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Building ${output_image}:${version} from ${{ matrix.source }}@${source_digest}"
+
+      - name: Build image
+        id: build
+        env:
+          SOURCE_IMAGE: ${{ steps.vars.outputs.source_image }}
+          OUTPUT_IMAGE: ${{ steps.vars.outputs.output_image }}
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # `bootc container lint` in the Containerfile fails the build on a
+          # broken derivation, so no separate validation step is needed.
+          podman build \
+            --build-arg "SOURCE_IMAGE=${SOURCE_IMAGE}" \
+            --build-arg "CLOUD_USER=${CLOUD_USER}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.description=Bazzite with cloud-init and first-boot flatpak seeding, for OpenStack" \
+            --label "org.opencontainers.image.licenses=Apache-2.0" \
+            --label "org.opencontainers.image.base.name=${SOURCE_IMAGE}" \
+            -t "localhost/${{ matrix.image }}:${VERSION}" \
+            -f Containerfile .
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push to GHCR
+        id: push
+        if: github.event_name != 'pull_request'
+        env:
+          OUTPUT_IMAGE: ${{ steps.vars.outputs.output_image }}
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Push once by version, then copy that digest to the moving tags, so
+          # every tag points at one manifest instead of several identical ones.
+          podman push --digestfile=/tmp/digestfile \
+            "localhost/${{ matrix.image }}:${VERSION}" \
+            "docker://${OUTPUT_IMAGE}:${VERSION}"
+
+          digest="$(< /tmp/digestfile)"
+          if [[ -z "$digest" ]]; then
+            echo "push reported success but wrote no digest" >&2
+            exit 1
+          fi
+
+          {
+            echo '# Pushed'
+            echo '```'
+            echo "${OUTPUT_IMAGE}:${VERSION}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for tag in stable latest; do
+            skopeo copy "docker://${OUTPUT_IMAGE}@${digest}" "docker://${OUTPUT_IMAGE}:${tag}"
+            echo "${OUTPUT_IMAGE}:${tag}" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: "v3.1.3"
+
+      - name: Sign container image
+        if: github.event_name != 'pull_request'
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          IMAGE: ${{ steps.vars.outputs.output_image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          # --new-bundle-format=false keeps the classic `.sig` tag layout that
+          # bootc/podman's containers-policy.json sigstore support expects.
+          cosign sign -y --key env://COSIGN_PRIVATE_KEY \
+            --new-bundle-format=false --use-signing-config=false \
+            "${IMAGE}@${DIGEST}"
+
+      - name: Verify signature
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE: ${{ steps.vars.outputs.output_image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Proves the committed cosign.pub really matches SIGNING_SECRET.
+          cosign verify --key cosign.pub "${IMAGE}@${DIGEST}"
+
+      - name: Attest build provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.vars.outputs.output_image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
