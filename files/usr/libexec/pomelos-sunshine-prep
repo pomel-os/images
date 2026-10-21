@@ -1,0 +1,25 @@
+#!/usr/bin/bash
+# Sunshine global_prep_cmd. sunshine_virt_display only turns off outputs on its
+# own card, so outputs on other cards (e.g. the VM's VNC display) are done here.
+set -u
+
+CARD=card1
+SOCK=/tmp/sunshineVD.sock
+
+other_cards() {
+    for s in /sys/class/drm/card*-*/status; do
+        [[ $s == */"$CARD"-* ]] || echo "$1" > "$s" 2>/dev/null || :
+    done
+}
+
+case "$1" in
+do)
+    other_cards off
+    echo "--connect,--width,${SUNSHINE_CLIENT_WIDTH},--height,${SUNSHINE_CLIENT_HEIGHT},--refresh-rate,${SUNSHINE_CLIENT_FPS},-d,$CARD" |
+        nc -U "$SOCK"
+    ;;
+undo)
+    echo --disconnect | nc -U "$SOCK"
+    other_cards detect
+    ;;
+esac

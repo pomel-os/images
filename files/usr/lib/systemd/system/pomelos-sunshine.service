@@ -1,0 +1,17 @@
+# Root so it can stream the login screen (KMS capture). See README "Sunshine".
+[Unit]
+Description=Sunshine game stream host
+Wants=network-online.target
+After=network-online.target display-manager.service
+
+[Service]
+ExecStart=/usr/bin/sunshine /etc/sunshine/sunshine.conf
+# systemd sets no HOME for root services; without it pairing fails.
+Environment=HOME=/root
+# The user's PipeWire; absent until login, so no audio at the greeter.
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

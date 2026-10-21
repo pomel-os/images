@@ -1,0 +1,16 @@
+[Unit]
+Description=Sunshine virtual display daemon
+After=display-manager.service dbus.service
+Requires=dbus.service
+
+[Service]
+# It writes state next to its code and /usr is read-only, so run a copy.
+RuntimeDirectory=sunshine-vd
+ExecStartPre=/usr/bin/cp -a /usr/lib/sunshine-vd/. /run/sunshine-vd/
+ExecStart=/usr/bin/python3 /run/sunshine-vd/src/daemon/daemon.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,4 @@
-# Adds cloud-init (upstream ships no user at all) and first-boot flatpak
+# Adds cloud-init (upstream ships no user at all), Sunshine, and first-boot flatpak
 # seeding. See README.md.
 
 ARG SOURCE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia-open:stable

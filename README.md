@@ -57,3 +57,45 @@ sudo podman run --rm -it --privileged --pull=newer \
 
 Result: `output/qcow2/disk.qcow2`. Swap `build` for `manifest` and drop the
 `/output` mount to validate config in seconds without running osbuild.
+
+## Sunshine
+
+`pomelos-sunshine.service` runs Sunshine as root from boot, so clients can
+stream the login screen. Settings live in `/etc/sunshine/sunshine.conf`; the
+web UI is on `https://<host>:47990`.
+
+Audio comes from the user's PipeWire (UID 1000 assumed), so there is none until
+someone logs in. Sunshine is a patched build from
+[pomel-os/copr_sunshine](https://github.com/pomel-os/copr_sunshine) (release and
+checksum pinned in `derive.sh`) that keeps retrying the audio server, so a stream
+started at the login screen gets audio once the user logs in.
+
+[sunshine_virt_display](https://github.com/frostplexx/sunshine_virt_display)
+(`pomelos-sunshine-vd.service`, pinned in `derive.sh`) gives each client a virtual
+display at its own resolution and refresh rate, via Sunshine's `global_prep_cmd`.
+
+## Testing on an existing VM
+
+Run a local registry once, then build and push on each change:
+
+```sh
+podman run -d --name registry -p 5000:5000 docker.io/library/registry:2
+podman build -t localhost:5000/pomelos-test -f Containerfile .
+podman push --tls-verify=false localhost:5000/pomelos-test
+```
+
+On the VM, `<host>` is the address it reaches the host on (the default gateway
+with user-mode networking, `192.168.122.1` on libvirt's default network):
+
+```sh
+sudo tee /etc/containers/registries.conf.d/50-dev.conf <<'CONF'
+[[registry]]
+location = "<host>:5000"
+insecure = true
+CONF
+sudo bootc switch <host>:5000/pomelos-test   # once
+sudo bootc upgrade --apply                   # after each push
+```
+
+Back to the published image:
+`sudo bootc switch ghcr.io/pomel-os/pomelos-bazzite-nvidia-open:stable`.

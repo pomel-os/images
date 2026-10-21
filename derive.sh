@@ -72,6 +72,29 @@ systemctl enable pomelos-flatpak-seed.timer
 # Leave flatpak-add-fedora-repos.service enabled — it creates the flathub remote
 # the seeding installs from. (The ISO disables it; its /var arrives preconfigured.)
 
+# --- sunshine ----------------------------------------------------------------
+# Patched build (audio retry) from github.com/pomel-os/copr_sunshine; the RPM
+# must target this image's Fedora release.
+log "layering sunshine"
+SUNSHINE_TAG=v2026.914.233613-2
+SUNSHINE_RPM=sunshine-2026.914.233613-2.fc44.x86_64.rpm
+SUNSHINE_SHA256=6ae19fd18cd94077cb06e02376bc9d0f56f53c7e3eb8868360dae49e52a0482e
+curl -fsSL -o "/tmp/${SUNSHINE_RPM}" \
+    "https://github.com/pomel-os/copr_sunshine/releases/download/${SUNSHINE_TAG}/${SUNSHINE_RPM}"
+echo "${SUNSHINE_SHA256}  /tmp/${SUNSHINE_RPM}" | sha256sum -c -
+dnf5 -y install "/tmp/${SUNSHINE_RPM}"
+systemctl enable pomelos-sunshine.service
+
+# Virtual display matching the client's resolution; see README "Sunshine".
+log "installing sunshine_virt_display"
+dnf5 -y install python3-jeepney
+command -v nc >/dev/null || dnf5 -y install nmap-ncat
+SVD_REV=4d84be67d09bb21c9d75dfa630d85b7b7a334758
+mkdir -p /usr/lib/sunshine-vd
+curl -fsSL "https://github.com/frostplexx/sunshine_virt_display/archive/${SVD_REV}.tar.gz" |
+    tar -xz --strip-components=1 -C /usr/lib/sunshine-vd
+systemctl enable pomelos-sunshine-vd.service
+
 # /var is discarded at install, so this is only about not shipping the debris in
 # a layer -- and about keeping `bootc container lint` quiet enough to notice a
 # real warning.
